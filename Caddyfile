@@ -1,0 +1,30 @@
+{
+    auto_https off
+}
+
+:80 {
+    encode gzip zstd
+
+    # Keycloak (OIDC) endpoint under /auth
+    # reverse_proxy keycloak:8080
+    handle_path /auth/* {
+        reverse_proxy keycloak:8080
+    }
+
+    # Registry API under /registry
+    handle_path /registry/* {
+        reverse_proxy tool-registry:4000
+    }
+
+    # Tool A at /tools/a
+    handle_path /tools/a/* {
+        reverse_proxy tool-a:3000
+    }
+
+    handle_path /launchpad {
+        # Launchpad catches all other traffic
+        reverse_proxy launchpad:3000
+
+    }
+
+}

@@ -1,0 +1,69 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    env_file: .env
+    restart: unless-stopped
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U capstack -d capstack"]
+    networks:
+      - capnet
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.7
+    command: ["start-dev","--import-realm"]
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - capnet
+
+  tool-registry:
+    build: ./tool-registry
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - capnet
+
+  example-tool:
+    build: ./example-tool
+    env_file: .env
+    depends_on:
+      tool-registry:
+        condition: service_started
+    networks:
+      - capnet
+
+  launchpad:
+    build: ./launchpad
+    env_file: .env
+    depends_on:
+      tool-registry:
+        condition: service_started
+    networks:
+      - capnet
+
+  caddy:
+    image: caddy:2-alpine
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "8080:80"
+    depends_on:
+      - launchpad
+      - tool-registry
+      - example-tool
+      - keycloak
+    networks:
+      - capnet
+
+networks:
+  capnet:
+    driver: bridge
+
+volumes:
+  pgdata:
