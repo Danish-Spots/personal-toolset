@@ -11,3 +11,7 @@ WORKDIR /app/launchpad
 RUN npm install
 
 RUN npm build
+
+# Figure out real name for nginx image
+FROM nginx:lts as Runner 
+
