@@ -1,0 +1,120 @@
+name: platform-v2
+
+x-common-env: &common-env
+  env_file:
+    - .env
+  networks:
+    - platformv2-internal
+  restart: unless-stopped
+
+x-node-app: &node-app
+  <<: *common-env
+  build:
+    context: ./infra/devbox
+  volumes:
+    - platformv2-workspace:/workspace
+  working_dir: /workspace
+  command: ["sleep", "infinity"]
+
+services:
+  workspace:
+    <<: *node-app
+    container_name: platformv2-workspace
+    volumes:
+      - platformv2-workspace:/workspace
+      - npm-cache:/home/node/.npm
+    ports:
+      - "9229:9229"
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: platformv2-postgres
+    <<: *common-env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.7
+    container_name: platformv2-keycloak
+    <<: *common-env
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL_HOST: postgres
+      KC_DB_URL_DATABASE: ${POSTGRES_DB}
+      KC_DB_USERNAME: ${POSTGRES_USER}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_PROXY_HEADERS: xforwarded
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  launchpad:
+    <<: *node-app
+    container_name: platformv2-launchpad
+    command: >
+      sh -lc "cd /workspace/apps/launchpad &&
+      npm ci &&
+      npm run dev -- --host 0.0.0.0 --port 4200"
+    ports:
+      - "4200:4200"
+
+  tool-registry:
+    <<: *node-app
+    container_name: platformv2-tool-registry
+    command: >
+      sh -lc "cd /workspace/apps/tool-registry &&
+      npm ci &&
+      npm run dev -- --host 0.0.0.0 --port 4300"
+    ports:
+      - "4300:4300"
+
+  tool-a:
+    <<: *node-app
+    container_name: platformv2-tool-a
+    command: >
+      sh -lc "cd /workspace/apps/tool-a &&
+      npm ci &&
+      npm run dev -- --host 0.0.0.0 --port 4400"
+    ports:
+      - "4400:4400"
+
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: platformv2-caddy
+    <<: *common-env
+    ports:
+      - "8080:80"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./infra/caddy/routes:/etc/caddy/routes:ro
+    depends_on:
+      - workspace
+      - launchpad
+      - tool-registry
+      - tool-a
+      - keycloak
+
+volumes:
+  platformv2-workspace:
+  npm-cache:
+  postgres-data:
+
+networks:
+  platformv2-internal:
+    driver: bridge
